@@ -10,7 +10,7 @@ import shutil
 import sqlite3
 
 from .analysis import analyze, select_interaction
-from .api import APILedger, BudgetExceeded, OpenAIClient
+from .api import APILedger, BudgetExceeded, LLMClient
 from .benchmark import StressProfile, World, generate_world, save_worlds
 from .config import ARTIFACTS, L9_PROFILES, ROOT, ExperimentConfig
 from .harness import ExperimentHarness, ResultStore
@@ -74,16 +74,16 @@ def generate_benchmark(config: ExperimentConfig) -> dict[str, Path]:
     return paths
 
 
-def build_runtime(config: ExperimentConfig) -> tuple[APILedger, OpenAIClient, ResultStore, ExperimentHarness]:
+def build_runtime(config: ExperimentConfig) -> tuple[APILedger, LLMClient, ResultStore, ExperimentHarness]:
     db_path = ARTIFACTS / "results.sqlite"
     ledger = APILedger(db_path, config.spend_cap_usd)
-    client = OpenAIClient(config, ledger)
+    client = LLMClient(config, ledger)
     store = ResultStore(db_path)
     harness = ExperimentHarness(config, client, store, ARTIFACTS)
     return ledger, client, store, harness
 
 
-def live_smoke(config: ExperimentConfig, client: OpenAIClient) -> None:
+def live_smoke(config: ExperimentConfig, client: LLMClient) -> None:
     result = client.respond_json(
         model=config.primary_model,
         instructions="Return the requested fixed JSON fields. This is a connectivity smoke test.",
@@ -205,10 +205,19 @@ def variance_selections(config: ExperimentConfig, store: ResultStore) -> tuple[l
 
 
 def paper(config: ExperimentConfig) -> None:
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is required")
-    generate_benchmark(config)
+    if not os.environ.get(config.api_key_env):
+        raise RuntimeError(f"{config.api_key_env} is required for {config.provider}")
     ledger, client, store, harness = build_runtime(config)
+    existing_hashes = {
+        row[0] for row in store.db.execute("SELECT DISTINCT config_hash FROM runs")
+    }
+    if existing_hashes and existing_hashes != {config.hash()}:
+        raise RuntimeError(
+            "artifacts/results.sqlite contains runs from a different provider/model "
+            "configuration; archive the artifacts directory and run 'make clean' before "
+            "starting a cross-model experiment"
+        )
+    generate_benchmark(config)
     live_smoke(config, client)
     pilot = pilot_worlds(config)
     run_stage(config, store, harness, "pilot", pilot)
@@ -266,7 +275,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("paper", "generate", "smoke", "clean"))
     args = parser.parse_args(argv)
-    config = ExperimentConfig()
+    config = ExperimentConfig.from_env()
     if args.command == "generate":
         paths = generate_benchmark(config)
         print(f"generated {len(paths)} benchmark stages under {ARTIFACTS / 'benchmark'}")

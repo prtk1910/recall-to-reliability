@@ -4,13 +4,14 @@ import io
 import tempfile
 import unittest
 import urllib.error
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from unittest import mock
 
 from reliabmem.api import (
-    APIHTTPError, APILedger, BudgetExceeded, OpenAIClient, Usage,
-    calculate_cost, parse_usage,
+    APIHTTPError, APILedger, BudgetExceeded, LLMClient, OpenAIClient, Usage,
+    calculate_cost, conforms_to_schema, parse_usage, reported_cost,
 )
 from reliabmem.config import ExperimentConfig, Price
 
@@ -166,6 +167,155 @@ class APITests(unittest.TestCase):
             self.assertEqual(
                 purposes, ["truncation", "truncation:output-retry-800"],
             )
+
+    def test_openrouter_chat_catalog_cost_and_schema_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = APILedger(Path(directory) / "ledger.sqlite", 50)
+            self.addCleanup(ledger.db.close)
+            config = replace(
+                ExperimentConfig(), provider="openrouter",
+                api_base_url="https://openrouter.ai/api/v1",
+                api_protocol="chat_completions", api_key_env="OPENROUTER_API_KEY",
+                primary_model="example/model", embedding_model="openai/text-embedding-3-small",
+                app_url="https://example.test/research", app_title="Reliability Test",
+                prices={},
+            )
+            catalog_calls = []
+            payloads = []
+
+            def catalog(url, headers):
+                catalog_calls.append((url, headers))
+                return {"data": {"id": "example/model", "pricing": {
+                    "prompt": "0.000001", "completion": "0.000004",
+                    "input_cache_read": "0.0000005", "request": "0",
+                }}}
+
+            def transport(url, payload, headers):
+                payloads.append((url, payload, headers))
+                if "response_format" in payload:
+                    raise APIHTTPError(
+                        400, "No endpoints found that support response_format",
+                        provider="openrouter",
+                    )
+                return {
+                    "id": "gen_test", "model": "example/model:provider",
+                    "choices": [{"message": {"content": "```json\n{\"ok\":true}\n```"},
+                                 "finish_reason": "stop"}],
+                    "usage": {
+                        "prompt_tokens": 120, "completion_tokens": 8, "cost": 0.0123,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 20, "cache_write_tokens": 5,
+                        },
+                        "completion_tokens_details": {"reasoning_tokens": 3},
+                    },
+                }
+
+            client = LLMClient(
+                config, ledger, api_key="openrouter-secret", transport=transport,
+                catalog_transport=catalog, sleep=lambda _: None,
+            )
+            schema = {"type": "object", "properties": {"ok": {"type": "boolean"}},
+                      "required": ["ok"], "additionalProperties": False}
+            first = client.respond_json(
+                model=config.primary_model, instructions="Return the result.", input_text="Test",
+                schema_name="result", schema=schema, purpose="openrouter-unit",
+            )
+            second = client.respond_json(
+                model=config.primary_model, instructions="Return the result.", input_text="Test",
+                schema_name="result", schema=schema, purpose="openrouter-unit",
+            )
+
+            self.assertEqual(first.json(), {"ok": True})
+            self.assertEqual(first.cost_usd, 0.0123)
+            self.assertEqual(first.usage, Usage(120, 20, 5, 8, 3))
+            self.assertEqual(first.request_hash, second.request_hash)
+            self.assertEqual(len(catalog_calls), 1)
+            self.assertEqual(len(payloads), 2)
+            self.assertTrue(payloads[0][0].endswith("/chat/completions"))
+            self.assertEqual(payloads[0][2]["HTTP-Referer"], "https://example.test/research")
+            self.assertEqual(payloads[0][2]["X-OpenRouter-Title"], "Reliability Test")
+            self.assertNotIn("response_format", payloads[1][1])
+            self.assertIn("JSON Schema", payloads[1][1]["messages"][0]["content"])
+            row = ledger.db.execute(
+                "SELECT provider,actual_cost_usd,input_price_per_million,"
+                "output_price_per_million FROM api_calls WHERE status='complete'"
+            ).fetchone()
+            self.assertEqual(row["provider"], "openrouter")
+            self.assertAlmostEqual(row["actual_cost_usd"], 0.0123)
+            self.assertEqual(row["input_price_per_million"], 1.0)
+            self.assertEqual(row["output_price_per_million"], 4.0)
+            self.assertNotIn(b"openrouter-secret", Path(directory, "ledger.sqlite").read_bytes())
+
+    def test_openrouter_environment_configuration(self) -> None:
+        environment = {
+            "RELIABMEM_PROVIDER": "openrouter",
+            "RELIABMEM_MODEL": "google/gemini-test",
+            "RELIABMEM_EMBEDDING_MODEL": "openai/text-embedding-3-small",
+            "RELIABMEM_INPUT_PRICE_PER_MILLION": "2.5",
+            "RELIABMEM_OUTPUT_PRICE_PER_MILLION": "7.5",
+            "OPENROUTER_SITE_URL": "https://example.test",
+            "OPENROUTER_APP_TITLE": "Test-Bed",
+        }
+        with mock.patch.dict("os.environ", environment, clear=True):
+            config = ExperimentConfig.from_env()
+        self.assertEqual(config.provider, "openrouter")
+        self.assertEqual(config.api_protocol, "chat_completions")
+        self.assertEqual(config.api_key_env, "OPENROUTER_API_KEY")
+        self.assertEqual(config.primary_model, "google/gemini-test")
+        self.assertEqual(config.prices[config.primary_model], Price(2.5, 2.5, 7.5, 2.5, 0))
+        self.assertEqual(config.app_url, "https://example.test")
+        self.assertEqual(config.app_title, "Test-Bed")
+
+    def test_openrouter_embedding_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = APILedger(Path(directory) / "ledger.sqlite", 50)
+            self.addCleanup(ledger.db.close)
+            embedding_model = "openai/text-embedding-3-small"
+            config = replace(
+                ExperimentConfig(), provider="openrouter",
+                api_base_url="https://openrouter.ai/api/v1",
+                api_protocol="chat_completions", api_key_env="OPENROUTER_API_KEY",
+                embedding_model=embedding_model,
+                prices={embedding_model: Price(0.02, 0.02, 0)},
+            )
+            calls = []
+
+            def transport(url, payload, headers):
+                calls.append((url, payload))
+                return {
+                    "id": "emb_test", "model": embedding_model,
+                    "data": [{"index": 0, "embedding": [0.1, 0.2]}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 0, "cost": 0.0001},
+                }
+
+            client = LLMClient(config, ledger, api_key="fake", transport=transport)
+            vectors, result = client.embed(["hello"], "embedding-unit")
+            self.assertEqual(vectors, [[0.1, 0.2]])
+            self.assertTrue(calls[0][0].endswith("/embeddings"))
+            self.assertEqual(calls[0][1]["model"], embedding_model)
+            self.assertEqual(result.cost_usd, 0.0001)
+
+    def test_openrouter_usage_cost_helpers(self) -> None:
+        shaped = {"usage": {
+            "prompt_tokens": 9, "completion_tokens": 4, "cost": "0.0012",
+            "prompt_tokens_details": {"cached_tokens": 2, "cache_write_tokens": 1},
+            "completion_tokens_details": {"reasoning_tokens": 3},
+        }}
+        self.assertEqual(parse_usage(shaped), Usage(9, 2, 1, 4, 3))
+        self.assertEqual(reported_cost(shaped), 0.0012)
+
+    def test_local_schema_validation_for_prompt_fallback(self) -> None:
+        schema = {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "name": {"type": "string"},
+                "values": {"type": "array", "items": {"type": "integer"}},
+            },
+            "required": ["name", "values"],
+        }
+        self.assertTrue(conforms_to_schema({"name": "x", "values": [1, 2]}, schema))
+        self.assertFalse(conforms_to_schema({"name": "x", "values": [True]}, schema))
+        self.assertFalse(conforms_to_schema({"name": "x", "values": [], "extra": 1}, schema))
 
 
 if __name__ == "__main__":

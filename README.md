@@ -21,7 +21,7 @@ Requirements:
 
 - Python 3.12 or newer
 - GNU Make or a compatible `make`
-- an OpenAI API key with access to the configured models
+- an OpenAI or OpenRouter API key
 
 Create a local environment file:
 
@@ -30,11 +30,25 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Add the key to `.env`:
+For direct OpenAI, add the key and model identifiers to `.env`:
 
 ```dotenv
+RELIABMEM_PROVIDER=openai
 OPENAI_API_KEY=your-key-here
+RELIABMEM_MODEL=gpt-5.6-luna
+RELIABMEM_EMBEDDING_MODEL=text-embedding-3-small
 ```
+
+To evaluate any text-generation model in the [OpenRouter catalog](https://openrouter.ai/models), use its catalog slug:
+
+```dotenv
+RELIABMEM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-key-here
+RELIABMEM_MODEL=anthropic/claude-sonnet-4.5
+RELIABMEM_EMBEDDING_MODEL=openai/text-embedding-3-small
+```
+
+The same configuration works with OpenRouter-hosted Gemini, Claude, OpenAI, Meta, and other catalog models by changing `RELIABMEM_MODEL`. Choose `RELIABMEM_EMBEDDING_MODEL` from OpenRouter's [embedding catalog](https://openrouter.ai/docs/api/api-reference/embeddings/list-embeddings-models). Model prices are resolved from the catalog; the exact charged cost and native token accounting are read from each response. Models without native JSON Schema support automatically use a schema-in-prompt fallback and remain subject to the same local schema validation and retry policy.
 
 Then run:
 
@@ -45,6 +59,8 @@ make paper
 ```
 
 `make paper` generates the benchmark, executes the staged evaluation, performs the statistical analysis, renders the figures, and writes the empirical manuscript. Runs are resumable: completed requests and evaluations are content-addressed and recovered from SQLite after interruption.
+
+Provider, base URL, model identifiers, pricing, and protocol are included in the configuration hash, so results from different models cannot silently share completed requests or run identifiers. The runner refuses to combine configurations in one results database. Before changing models, archive the existing `artifacts/` directory outside the repository and run `make clean`; this keeps each model's statistical analysis isolated.
 
 No external database or vector service is required. API keys, raw responses, and generated research artifacts are excluded from version control.
 

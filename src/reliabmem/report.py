@@ -46,10 +46,14 @@ def generate_report(root: Path, db_path: Path, analysis: dict[str, Any],
         'provider-default sampling because explicit temperature control was unavailable'
         if omitted_temperature else 'temperature zero'
     )
-    reasoning_context_method = (
-        'stateless requests without the rejected reasoning.context field'
-        if omitted_reasoning_context else 'reasoning.context=current_turn'
-    )
+    if config.api_protocol == "chat_completions":
+        request_state_method = "independent Chat Completions requests without conversation state"
+    else:
+        reasoning_context_method = (
+            'stateless requests without the rejected reasoning.context field'
+            if omitted_reasoning_context else 'reasoning.context=current_turn'
+        )
+        request_state_method = f"`store=false` and {reasoning_context_method}"
     best = max(analysis["architecture_summary"], key=lambda row: row["accuracy"])
     failures = sum(row["count"] for row in analysis["failure_modes"])
     interaction = analysis["selected_interaction"]
@@ -57,6 +61,11 @@ def generate_report(root: Path, db_path: Path, analysis: dict[str, Any],
     decisions = json.loads(decisions_path.read_text()) if decisions_path.exists() else {}
     variance_note = "executed" if decisions.get("variance_audit") else "omitted"
     manifest = build_manifest(root)
+    pricing_method = (
+        "the catalog rates retained with each request and the charged cost returned by OpenRouter"
+        if config.provider == "openrouter"
+        else "the token counts returned by the API and the pricing snapshot pinned in configuration"
+    )
     manifest_runs = [row[0] for row in db.execute("SELECT run_id FROM runs WHERE completed_at IS NOT NULL")]
     manifest_runs.append(run_id)
     with db:
@@ -102,7 +111,7 @@ We generate conversations deterministically from latent world states rather than
 
 All selective systems operate under the same 8,000-token retrieval budget. Full context serves as an uncompressed reference condition. The recency baseline retains the newest turns; vector RAG embeds bounded chunks and restores retrieved chunks to chronological order; hierarchical memory recursively summarizes ten-turn leaves with fan-out ten; structured temporal memory stores versioned facts in SQLite; and the query-only condition measures performance without conversational memory. Every backend implements the same benchmark-facing interface—`observe`, `build_context`, `snapshot`, and `reset`—and receives no gold annotations.
 
-All primary evaluations used `{config.primary_model}` at low reasoning effort, {temperature_method}, `store=false`, and {reasoning_context_method}; embeddings used `{config.embedding_model}`. Requests were stateless and content-addressed, allowing interrupted runs to resume without repeating completed evaluations. The ledger records requested and returned models, response identifiers, retry counts, latency, detailed token usage, prompt hashes, and timestamps.
+All primary evaluations used `{config.primary_model}` through `{config.provider}` at low reasoning effort, {temperature_method}, and {request_state_method}; embeddings used `{config.embedding_model}`. Requests were content-addressed, allowing interrupted runs to resume without repeating completed evaluations. The ledger records the provider, requested and returned models, response identifiers, retry counts, latency, detailed token usage, prompt hashes, and timestamps.
 
 ## 4. Experimental design and statistical analysis
 
@@ -144,7 +153,7 @@ Among {analysis['tool_funnel']['tool_questions']} tool-oriented decisions, the t
 
 ## 7. Efficiency and repeatability
 
-Operational efficiency includes amortized memory ingestion, retrieval, and answering. Cost estimates use the token counts returned by the API and the pricing snapshot pinned in the experiment configuration; diagnostic interventions and deterministic benchmark construction are excluded from the operational comparison. The Pareto view therefore compares architectures on the same decision workload rather than total project expenditure.
+Operational efficiency includes amortized memory ingestion, retrieval, and answering. Cost estimates use {pricing_method}; diagnostic interventions and deterministic benchmark construction are excluded from the operational comparison. The Pareto view therefore compares architectures on the same decision workload rather than total project expenditure.
 
 ![Accuracy-cost Pareto view](artifacts/figures/05_accuracy_cost_pareto.svg)
 

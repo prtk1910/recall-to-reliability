@@ -8,7 +8,7 @@ import re
 import sqlite3
 import time
 
-from .api import APIResult, OpenAIClient
+from .api import APIResult, LLMClient
 from .benchmark import Task, World
 from .config import ExperimentConfig
 from .memory import ContextTrace, MemoryBackend, create_backend
@@ -185,7 +185,7 @@ class ResultStore:
 
 
 class ExperimentHarness:
-    def __init__(self, config: ExperimentConfig, client: OpenAIClient, store: ResultStore,
+    def __init__(self, config: ExperimentConfig, client: LLMClient, store: ResultStore,
                  artifact_dir: Path):
         self.config = config
         self.client = client
