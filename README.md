@@ -1,81 +1,78 @@
 # Recall to Reliability
 
-A reproducible Python test bed for studying long-term memory reliability in LLM assistants. It compares full context, recency windows, vector RAG, hierarchical summaries, structured temporal memory, and a query-only baseline under controlled temporal distance, interference, and contradiction stress.
+An experimental framework for identifying when long-term memory fails in language-model assistants—and whether the failure originates in storage, retrieval, context integration, reasoning, or tool grounding.
 
-The benchmark is generated deterministically from latent world state. Tool tasks use local simulators only; the test bed cannot send messages, make purchases, create bookings, or perform other external actions.
+The benchmark generates deterministic conversations from latent world states and varies three stressors independently: temporal distance, semantic interference, and superseding contradictions. Six memory conditions are evaluated under a shared interface and, for selective systems, a shared context budget:
 
-## Requirements
+- full context;
+- recency;
+- vector retrieval-augmented generation;
+- hierarchical summarization;
+- structured temporal memory; and
+- a query-only baseline.
+
+Every prediction retains a causal trace from the source turn through memory writing, consolidation, retrieval, prompt assembly, and final output. Failures are probed with oracle-retrieval and gold-only counterfactuals. Tool tasks execute exclusively against deterministic local simulators.
+
+## Reproducing the study
+
+The canonical repository is [github.com/prtk1910/recall-to-reliability](https://github.com/prtk1910/recall-to-reliability).
+
+Requirements:
 
 - Python 3.12 or newer
-- GNU Make or compatible `make`
-- An OpenAI API key with access to the configured models
+- GNU Make or a compatible `make`
+- an OpenAI API key with access to the configured models
 
-No external database or vector service is required. SQLite and vector operations run locally.
-
-## Setup
+Create a local environment file:
 
 ```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-Open `.env` and replace the placeholder with your API key:
+Add the key to `.env`:
 
 ```dotenv
 OPENAI_API_KEY=your-key-here
 ```
 
-The `.env` file and all generated artifacts are ignored by Git. Never commit a real API key.
-
-## Run
-
-Run the tests first:
+Then run:
 
 ```bash
 make test
-```
-
-Verify live API compatibility with a minimal request:
-
-```bash
 make smoke
-```
-
-Generate the benchmark, run the staged experiment, analyze results, create figures, and write the empirical paper:
-
-```bash
 make paper
 ```
 
-The runner is resumable. Completed requests and evaluations are checkpointed in SQLite and are reused after interruption.
+`make paper` generates the benchmark, executes the staged evaluation, performs the statistical analysis, renders the figures, and writes the empirical manuscript. Runs are resumable: completed requests and evaluations are content-addressed and recovered from SQLite after interruption.
 
-## Outputs
+No external database or vector service is required. API keys, raw responses, and generated research artifacts are excluded from version control.
 
-Generated outputs are local and intentionally excluded from version control:
+## Experimental design
 
-- `PAPER.md` — completed empirical paper
-- `artifacts/results.sqlite` — normalized results and API-call ledger
-- `artifacts/raw/results.jsonl` — append-only result and diagnostic records
-- `artifacts/benchmark/` — deterministic benchmark worlds and manifest
-- `artifacts/tables/` — derived CSV and JSON analysis tables
-- `artifacts/figures/` — generated SVG figures
+The study proceeds through an end-to-end pilot, a balanced L9 screening design, and a fresh 3×3 expansion of the interaction selected by leave-one-world-out predictive improvement. Questions are nested within independently generated worlds. Analysis uses paired world-clustered bootstrap intervals, Holm-adjusted paired risk differences, and logistic GEE with world-clustered sandwich standard errors.
 
-## Other commands
+The benchmark-facing memory contract is:
 
-```bash
-make generate  # Generate benchmark data without API calls
-make clean     # Remove generated artifacts
+```python
+observe(turn) -> WriteTrace
+build_context(task) -> ContextTrace
+snapshot() -> MemorySnapshot
+reset(world_id) -> None
 ```
 
-## Experiment controls
+Gold facts never enter this interface. Configuration, model metadata, prompt hashes, detailed token usage, latency, retry history, random seeds, code revision, and artifact checksums are retained for each run.
 
-- Requests are reserved against a hard configured spend cap before execution.
-- API responses record requested and returned model IDs, response IDs, usage, latency, retries, and timestamps.
-- Requests use `store=false` and do not rely on hidden conversation state.
-- Paid calls and completed evaluations are keyed for retry-safe recovery.
-- The report refuses to run when experiment stages are incomplete or inconsistent.
+## Generated outputs
 
-Model names, pricing snapshots, stress levels, seeds, context budgets, and stage sizes are defined in `src/reliabmem/config.py`.
+- `PAPER.md` — empirical manuscript
+- `artifacts/results.sqlite` — normalized results and request ledger
+- `artifacts/raw/results.jsonl` — append-only results and diagnostic records
+- `artifacts/benchmark/` — deterministic worlds and manifest
+- `artifacts/tables/` — derived statistical tables
+- `artifacts/figures/` — publication-ready SVG figures
+
+Generated outputs remain local by default. To create the benchmark without model calls, run `make generate`.
 
 ## License
 

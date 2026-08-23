@@ -7,5 +7,6 @@ __pycache__/
 !.env.example
 *.md
 !README.md
+*.docx
 artifacts/*
 !artifacts/.gitkeep

@@ -70,7 +70,7 @@ class FakePaperIntegrationTests(unittest.TestCase):
                 store.complete_run(run_id)
             result = analyze(db_path, artifacts / "tables", config.seed)
             generate_report(root, db_path, result, config, last_run)
-            self.assertIn("## Results", (root / "PAPER.md").read_text())
+            self.assertIn("## 5. Results", (root / "PAPER.md").read_text())
             self.assertEqual(len(list((artifacts / "figures").glob("*.svg"))), 6)
             self.assertTrue((artifacts / "tables" / "analysis.json").exists())
 
