@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.coverage
+.pytest_cache/
+.env*
+!.env.example
+*.md
+!README.md
+artifacts/*
+!artifacts/.gitkeep
