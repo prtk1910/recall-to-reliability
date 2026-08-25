@@ -15,7 +15,10 @@ from .util import atomic_write_text, canonical_json
 
 def load_primary_rows(db: sqlite3.Connection, stages: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
     db.row_factory = sqlite3.Row
-    where = "WHERE r.repeat_index=0"
+    where = (
+        "WHERE r.repeat_index=0 "
+        "AND t.task_type != 'tool_argument_grounding'"
+    )
     params: list[Any] = []
     if stages:
         where += f" AND r.stage IN ({','.join('?' for _ in stages)})"
@@ -211,8 +214,10 @@ def stress_curves(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def repeat_variance(db: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = [dict(row) for row in db.execute(
-        "SELECT task_id,architecture,COUNT(*) n,AVG(success) mean_success FROM results "
-        "GROUP BY task_id,architecture HAVING COUNT(*)>1")]
+        "SELECT r.task_id,r.architecture,COUNT(*) n,AVG(r.success) mean_success "
+        "FROM results r JOIN tasks t USING(task_id) "
+        "WHERE t.task_type != 'tool_argument_grounding' "
+        "GROUP BY r.task_id,r.architecture HAVING COUNT(*)>1")]
     for row in rows:
         p = row["mean_success"]
         row["bernoulli_variance"] = p * (1 - p)
