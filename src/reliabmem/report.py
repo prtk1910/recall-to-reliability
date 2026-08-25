@@ -93,7 +93,7 @@ def generate_report(root: Path, db_path: Path, analysis: dict[str, Any],
 
 ## Abstract
 
-Long-term memory is increasingly treated as an infrastructure component of language-model assistants, yet aggregate recall scores obscure where memory pipelines fail and how those failures propagate into action. We introduce a controlled test bed that varies temporal distance, semantic interference, and superseding contradictions while preserving complete causal lineage from source turn to model output. Across {analysis['row_count']:,} decisions in {analysis['world_count']:,} independently generated worlds, we compare full context, recency, vector retrieval, hierarchical summarization, structured temporal memory, and a query-only baseline. **{display_name(best['architecture'])}** achieved the highest observed accuracy ({pct(best['accuracy'])}; world-clustered 95% CI, {pct(best['accuracy_ci_low'])}–{pct(best['accuracy_ci_high'])}). Source-turn interventions rescued {pct(analysis['oracle_rescue_rate'])} of failures, demonstrating that retrieval is consequential but not sufficient: tool grounding, reasoning, and context integration persisted as downstream failure modes. These results provide a stress-regime map of memory reliability and a reproducible framework for separating storage, retrieval, integration, and action errors.
+Long-term memory is increasingly treated as an infrastructure component of language-model assistants, yet aggregate recall scores obscure where memory pipelines fail and how those failures propagate into action. We introduce a controlled test bed that varies temporal distance, semantic interference, and superseding contradictions while preserving complete causal lineage from source turn to model output. Across {analysis['row_count']:,} decisions in {analysis['world_count']:,} independently generated worlds, we compare full context, recency, vector retrieval, hierarchical summarization, structured temporal memory, and a query-only baseline. **{display_name(best['architecture'])}** achieved the highest observed accuracy ({pct(best['accuracy'])}; world-clustered 95% CI, {pct(best['accuracy_ci_low'])}–{pct(best['accuracy_ci_high'])}). Source-turn interventions rescued {pct(analysis['oracle_rescue_rate'])} of failures, demonstrating that retrieval is consequential but not sufficient: reasoning, abstention-or-forgetting-policy, and context-integration failures persisted downstream of retrieval. A fixed-context replication with a second reader yielded similar semantic reliability across memory-bearing conditions (90.2% for Luna versus 91.2% for Ox), while exact-match scores were substantially more reader-style-sensitive. These results provide a stress-regime map of memory reliability and a reproducible framework for separating storage, retrieval, integration, action, and evaluation errors.
 
 ## 1. Introduction
 
@@ -107,7 +107,7 @@ This study builds on the failure taxonomies and operational perspectives develop
 
 ## 3. Benchmark and memory systems
 
-We generate conversations deterministically from latent world states rather than from a language model. Each world instantiates exact levels of final-evidence distance (10, 100, or 1,000 turns), semantically related interference (10, 100, or 1,000 facts), and contradiction count (0, 1, or 3 superseding updates). Twelve tasks probe atomic recall, current and historical state, coexisting and conditional facts, temporal ordering, two- and four-hop reasoning, selective forgetting, abstention, tool arguments, and tool selection. Automated validators reject answer leakage, state-transition inconsistencies, factor-count mismatches, and broken evidence lineage.
+We generate conversations deterministically from latent world states rather than from a language model. Each world instantiates exact levels of final-evidence distance (10, 100, or 1,000 turns), semantically related interference (10, 100, or 1,000 facts), and contradiction count (0, 1, or 3 superseding updates). Eleven retained tasks probe atomic recall, current and historical state, coexisting and conditional facts, temporal ordering, two- and four-hop reasoning, selective forgetting, abstention, and tool selection. Automated validators reject answer leakage, state-transition inconsistencies, factor-count mismatches, and broken evidence lineage. A post hoc benchmark audit identified the original `tool_argument_grounding` task as under-specified because its required tool identifier appeared only in hidden gold metadata rather than in model-visible evidence or the query. We therefore exclude that task from all reported analyses and recompute results over the remaining eleven tasks.
 
 All selective systems operate under the same 8,000-token retrieval budget. Full context serves as an uncompressed reference condition. The recency baseline retains the newest turns; vector RAG embeds bounded chunks and restores retrieved chunks to chronological order; hierarchical memory recursively summarizes ten-turn leaves with fan-out ten; structured temporal memory stores versioned facts in SQLite; and the query-only condition measures performance without conversational memory. Every backend implements the same benchmark-facing interface—`observe`, `build_context`, `snapshot`, and `reset`—and receives no gold annotations.
 
@@ -139,7 +139,7 @@ The GEE main-effect estimates use only the L9 screening worlds and adjust for ta
 
 ## 6. Mechanistic failure analysis
 
-For each of {failures:,} primary failures, we performed two counterfactual interventions: an oracle-retrieval condition that restored the original evidence turns and a gold-only condition containing the minimal sufficient evidence. Oracle retrieval rescued {pct(analysis['oracle_rescue_rate'])} of failures. Nevertheless, {pct(analysis['non_retrieval_failure_fraction'])} of failures received a non-retrieval primary attribution, showing that evidence access alone does not ensure correct integration, reasoning, abstention, or tool grounding.
+For each of {failures:,} primary failures, we performed two counterfactual interventions: an oracle-retrieval condition that restored the original evidence turns and a gold-only condition containing the minimal sufficient evidence. Oracle retrieval rescued {pct(analysis['oracle_rescue_rate'])} of failures. Nevertheless, {pct(analysis['non_retrieval_failure_fraction'])} of failures received a non-retrieval primary attribution, showing that evidence access alone does not ensure correct integration, reasoning, or abstention-and-forgetting-policy behavior.
 
 | Primary cause | Count | Fraction of failures |
 |---|---:|---:|
@@ -147,11 +147,21 @@ For each of {failures:,} primary failures, we performed two counterfactual inter
 
 ![Failure distribution and oracle rescue](artifacts/figures/03_failure_modes.svg)
 
-Among {analysis['tool_funnel']['tool_questions']} tool-oriented decisions, the trace-based retrieval criterion was satisfied in {analysis['tool_funnel']['correct_evidence_retrieval']} cases ({pct(analysis['tool_funnel']['correct_evidence_retrieval'] / analysis['tool_funnel']['tool_questions'])}), while {analysis['tool_funnel']['correct_tool_execution']} ({pct(analysis['tool_funnel']['correct_tool_execution'] / analysis['tool_funnel']['tool_questions'])}) produced the exact expected call. These criteria are scored independently rather than as nested stages: a context may support a correct deterministic action without satisfying the stricter source-trace retrieval flag. All actions were evaluated against local simulators.
+Among {analysis['tool_funnel']['tool_questions']} retained tool-selection decisions, the trace-based retrieval criterion was satisfied in {analysis['tool_funnel']['correct_evidence_retrieval']} cases ({pct(analysis['tool_funnel']['correct_evidence_retrieval'] / analysis['tool_funnel']['tool_questions'])}), while {analysis['tool_funnel']['correct_tool_execution']} ({pct(analysis['tool_funnel']['correct_tool_execution'] / analysis['tool_funnel']['tool_questions'])}) produced the exact expected call. These criteria are scored independently rather than as nested stages: a context may support a correct deterministic action without satisfying the stricter source-trace retrieval flag. All actions were evaluated against local simulators.
 
 ![Retrieval-to-tool execution funnel](artifacts/figures/04_retrieval_tool_funnel.svg)
 
-## 7. Efficiency and repeatability
+## 7. Reader-model robustness
+
+To test whether the main reliability conclusions depended on the downstream language model, we performed a fixed-context reader-model replication. We replayed the stored screening prompts through a second reader, Ox Alpha (`x-preview-f-free`), while holding the assembled memory contexts and retrieved evidence fixed. This is therefore a reader-model replication rather than a full cross-model memory-pipeline replication: summaries, structured memories, and other model-produced memory representations remained those constructed during the original Luna run.
+
+The original exact-answer evaluator proved sensitive to response style. Ox frequently produced semantically correct answers with additional explanatory text that failed exact normalization. We therefore froze a deterministic, task-specific semantic rescoring procedure and applied it identically to Luna and Ox, while retaining the original exact/protocol score as a sensitivity analysis.
+
+After excluding the under-specified `tool_argument_grounding` task, 2,969 paired retained screening outputs were available. Across the five memory-bearing architectures (2,474 paired decisions), Luna achieved 90.18% semantic accuracy and Ox achieved 91.23%, a paired difference of +1.05 percentage points (world-clustered 95% CI, +0.20 to +1.98). The small difference indicates that substantive memory reliability was largely stable to the downstream reader swap.
+
+Across all retained architectures, including query-only, semantic accuracy was 75.14% for Luna and 77.47% for Ox (difference +2.32 percentage points; 95% CI, +1.58 to +3.10). In contrast, the original exact/protocol evaluator scored Luna at 69.42% and Ox at 47.32%. Thus the reader substitution had little practical effect on semantic memory performance but a large effect on exact-match compliance, showing that evaluator format sensitivity can be mistaken for a model-reliability difference.
+
+## 8. Efficiency and repeatability
 
 Operational efficiency includes amortized memory ingestion, retrieval, and answering. Cost estimates use {pricing_method}; diagnostic interventions and deterministic benchmark construction are excluded from the operational comparison. The Pareto view therefore compares architectures on the same decision workload rather than total project expenditure.
 
@@ -159,19 +169,19 @@ Operational efficiency includes amortized memory ingestion, retrieval, and answe
 
 ![Token, cache, and cost breakdown](artifacts/figures/06_token_cost_breakdown.svg)
 
-Repeat-call variability is reported separately in [`repeat_variance.csv`](artifacts/tables/repeat_variance.csv). Primary uncertainty estimates resample worlds, preserving the dependence among the twelve tasks derived from each latent state.
+Repeat-call variability is reported separately in [`repeat_variance.csv`](artifacts/tables/repeat_variance.csv). Primary uncertainty estimates resample worlds, preserving the dependence among the eleven retained tasks derived from each latent state.
 
-## 8. Reproducibility
+## 9. Reproducibility
 
 The complete test bed and execution instructions are available at [github.com/prtk1910/recall-to-reliability](https://github.com/prtk1910/recall-to-reliability). Running `make paper` reconstructs the benchmark, executes resumable evaluations, performs the statistical analysis, regenerates all figures, and writes the manuscript. Each run records its configuration hash, code revision, prompt hashes, model metadata, random seed, and artifact checksums. This analysis used configuration `{config.hash()}` and code revision `{code_revision(root)}`; the manifest contains {len(manifest)} checksummed pre-report artifacts.
 
-## 9. Limitations
+## 10. Limitations
 
-The benchmark is synthetic, English-language, and centered on assistant-style factual memory. Extraction, summarization, and answering use the same primary model, so their errors are not independent. The provider did not expose deterministic temperature control for this model, and the repeat audit covers only a stratified subset. GEE estimates may be unstable for rare outcomes or quasi-separation. The selected interaction is confirmed only within a fresh slice whose third factor is fixed at its middle level. Most importantly, a single model family and controlled latent worlds cannot establish cross-model robustness or real-user validity.
+The benchmark is synthetic, English-language, and centered on assistant-style factual memory. Extraction, summarization, and answering use the same primary model, so their errors are not independent. The provider did not expose deterministic temperature control for this model, and the repeat audit covers only a stratified subset. GEE estimates may be unstable for rare outcomes or quasi-separation. The selected interaction is confirmed only within a fresh slice whose third factor is fixed at its middle level. Memory construction and retrieval were evaluated using a single primary model family, so the fixed-context Ox replication tests downstream reader robustness rather than full cross-model memory-pipeline robustness. Controlled latent worlds also cannot establish real-user validity.
 
-## 10. Conclusion
+## 11. Conclusion
 
-Memory architecture materially changes assistant reliability, particularly under long temporal displacement. Hierarchical summarization and vector retrieval approached the full-context reference while using selective context, but no architecture eliminated downstream reasoning and grounding errors. The oracle interventions show why end-to-end memory evaluation should trace the entire pipeline: retrieving the right evidence is often necessary, yet it is not equivalent to using that evidence correctly. Controlled stress regimes and causal diagnostics offer a more informative basis for designing reliable persistent assistants than aggregate recall alone.
+Memory architecture materially changes assistant reliability, particularly under long temporal displacement. Hierarchical summarization and vector retrieval approached the full-context reference while using selective context, but no architecture eliminated downstream reasoning, policy, and context-integration errors. The oracle interventions show why end-to-end memory evaluation should trace the entire pipeline: retrieving the right evidence is often necessary, yet it is not equivalent to using that evidence correctly. Controlled stress regimes and causal diagnostics offer a more informative basis for designing reliable persistent assistants than aggregate recall alone.
 
 ## References
 
@@ -191,7 +201,12 @@ def validate_report_inputs(db: sqlite3.Connection, analysis: dict[str, Any],
         raise ValueError("report generation blocked by incomplete run")
     stages = analysis.get("included_stages", [])
     db_count = db.execute(
-        f"SELECT COUNT(*) FROM results WHERE repeat_index=0 AND stage IN ({','.join('?' for _ in stages)})",
+        f"""SELECT COUNT(*)
+            FROM results r
+            JOIN tasks t USING(task_id)
+            WHERE r.repeat_index=0
+              AND t.task_type != 'tool_argument_grounding'
+              AND r.stage IN ({','.join('?' for _ in stages)})""",
         stages,
     ).fetchone()[0]
     if db_count != analysis.get("row_count"):
@@ -232,7 +247,8 @@ def hypothesis_text(rows: list[dict[str, Any]], analysis: dict[str, Any]) -> str
     else:
         findings.append(
             f"The {pct(nonretrieval)} non-retrieval attribution rate fell below the prespecified "
-            ">50% threshold, although it still represents nearly half of all observed failures."
+            ">50% threshold, indicating that retrieval-related failures constituted the majority "
+            "of observed failures."
         )
     return " ".join(findings)
 

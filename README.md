@@ -1,6 +1,6 @@
 # Recall to Reliability
 
-An experimental framework for identifying when long-term memory fails in language-model assistants—and whether the failure originates in storage, retrieval, context integration, reasoning, or tool grounding.
+An experimental framework for identifying when long-term memory fails in language-model assistants—and whether the failure originates in storage, retrieval, context integration, reasoning, or downstream action.
 
 The benchmark generates deterministic conversations from latent world states and varies three stressors independently: temporal distance, semantic interference, and superseding contradictions. Six memory conditions are evaluated under a shared interface and, for selective systems, a shared context budget:
 
@@ -12,6 +12,14 @@ The benchmark generates deterministic conversations from latent world states and
 - a query-only baseline.
 
 Every prediction retains a causal trace from the source turn through memory writing, consolidation, retrieval, prompt assembly, and final output. Failures are probed with oracle-retrieval and gold-only counterfactuals. Tool tasks execute exclusively against deterministic local simulators.
+
+## Audited benchmark and results
+
+The reported analysis uses **11 retained task types** across 45 independently generated screening worlds and six memory conditions, for **2,970 screening decisions**. A post hoc benchmark audit excluded the original `tool_argument_grounding` task because the required tool identifier appeared only in hidden gold metadata rather than in the model-visible query or memory; failures on that task therefore measured hidden-name guessing rather than argument grounding.
+
+On the audited benchmark, hierarchical summarization achieved **91.7%** accuracy, full context **90.5%**, vector RAG **88.5%**, structured temporal memory **82.2%**, recency **63.6%**, and query-only **0.0%**. Restoring the original source evidence rescued **79.4%** of screening failures, with retrieval misses accounting for the largest failure category.
+
+A fixed-context reader-model replication replayed the same stored screening prompts through Ox Alpha while holding memory contexts and retrieved evidence fixed. Across the five memory-bearing architectures, semantic accuracy was **90.18% for Luna and 91.23% for Ox** (paired difference +1.05 percentage points; world-clustered 95% CI, +0.20 to +1.98). The original exact/protocol evaluator was substantially more response-style-sensitive, motivating a deterministic task-specific semantic rescore. This experiment tests downstream reader robustness rather than a full cross-model memory-pipeline replication.
 
 ## Reproducing the study
 
@@ -62,7 +70,7 @@ make paper
 
 Provider, base URL, model identifiers, pricing, and protocol are included in the configuration hash, so results from different models cannot silently share completed requests or run identifiers. The runner refuses to combine configurations in one results database. Before changing models, archive the existing `artifacts/` directory outside the repository and run `make clean`; this keeps each model's statistical analysis isolated.
 
-No external database or vector service is required. API keys, raw responses, and generated research artifacts are excluded from version control.
+No external database or vector service is required. API keys, raw responses, and large experiment databases remain local and are excluded from version control. Lightweight paper tables, figures, and reproducibility summaries may be versioned with the manuscript.
 
 ## Experimental design
 
